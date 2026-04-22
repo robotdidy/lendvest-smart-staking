@@ -190,3 +190,41 @@ getBondSize() - CLEAN
 _bondParams() - CLEAN
 eligibleForLiquidationPool() - CLEAN
 claimBond() - CLEAN
+FINDING #4 — [LVLidoVaultUtilRescue.sol :: executeRescue()]
+Severity: High
+Dimension: DIMENSION 12 — ECONOMIC ATTACK SURFACES / Rescue Flow
+The Broken Assumption: The developer assumed that the rescue flow replicated all the exact same logic as `closeEpoch()` in the upkeeper.
+Attack Path:
+1. An issue occurs, and the owner decides to trigger `LVLidoVaultUtilRescue.executeRescue()` to close the epoch manually.
+2. The `executeRescue()` function performs all math, calls `_processLidoWithdrawal`, calculates amounts owed, clears Ajna deposits, and calls `_processMatchesAndCreateOrders`.
+3. However, it completely skips the `_withdrawAaveDepositsForEpochClose()` step that the normal `LVLidoVaultUpkeeper` executes.
+4. Because this step is missing, all Aave deposits from the epoch remain in Aave, but their respective accounting (`totalAaveLenderDeposits`, `totalAaveCLDeposits`, and user specific deposits) are NOT reset, and the corresponding `quoteAmount` for `lenderOrders` is NOT restored with principal + interest.
+5. When users try to withdraw, they cannot access their funds properly, or Aave funds become permanently stuck because the protocol moves to the next epoch without unwinding the current Aave position.
+Why It Works Mechanically: The code simply misses the `_withdrawAaveDepositsForEpochClose()` function call. `executeRescue()` goes straight from `_clearDepositsAndBurnTokens(pool);` to `_processMatchesAndCreateOrders()`.
+Funds at Risk: All funds (principal and interest) currently deposited in Aave by unutilized lenders and collateral lenders during the rescued epoch.
+Minimal Fix:
+Copy `_withdrawAaveDepositsForEpochClose()` from `LVLidoVaultUpkeeper` and insert it into `LVLidoVaultUtilRescue.executeRescue()` between `_clearDepositsAndBurnTokens` and `_processMatchesAndCreateOrders`.
+
+FINDING #4 — [LVLidoVaultUtilRescue.sol :: executeRescue()]
+Severity: High
+Dimension: DIMENSION 12 — ECONOMIC ATTACK SURFACES / Rescue Flow
+The Broken Assumption: The developer assumed that the rescue flow replicated all the exact same logic as `closeEpoch()` in the upkeeper.
+Attack Path:
+1. An issue occurs, and the owner decides to trigger `LVLidoVaultUtilRescue.executeRescue()` to close the epoch manually.
+2. The `executeRescue()` function performs all math, calls `_processLidoWithdrawal`, calculates amounts owed, clears Ajna deposits, and calls `_processMatchesAndCreateOrders`.
+3. However, it completely skips the `_withdrawAaveDepositsForEpochClose()` step that the normal `LVLidoVaultUpkeeper` executes.
+4. Because this step is missing, all Aave deposits from the epoch remain in Aave, but their respective accounting (`totalAaveLenderDeposits`, `totalAaveCLDeposits`, and user specific deposits) are NOT reset, and the corresponding `quoteAmount` for `lenderOrders` is NOT restored with principal + interest.
+5. When users try to withdraw, they cannot access their funds properly, or Aave funds become permanently stuck because the protocol moves to the next epoch without unwinding the current Aave position.
+Why It Works Mechanically: The code simply misses the `_withdrawAaveDepositsForEpochClose()` function call. `executeRescue()` goes straight from `_clearDepositsAndBurnTokens(pool);` to `_processMatchesAndCreateOrders()`.
+Funds at Risk: All funds (principal and interest) currently deposited in Aave by unutilized lenders and collateral lenders during the rescued epoch.
+PoC Skeleton:
+```solidity
+function testEmergencyRescueAaveStuck() public {
+    // 1. Setup normal epoch with lender deposits
+    // 2. Fast forward 14 days
+    // 3. Vault owner executes LVLidoVaultUtilRescue.executeRescue()
+    // 4. Lenders cannot withdraw their full funds, Aave deposits remain in the vault's name indefinitely
+}
+```
+Minimal Fix:
+Copy `_withdrawAaveDepositsForEpochClose()` from `LVLidoVaultUpkeeper` and insert it into `LVLidoVaultUtilRescue.executeRescue()` between `_clearDepositsAndBurnTokens` and `_processMatchesAndCreateOrders`.
